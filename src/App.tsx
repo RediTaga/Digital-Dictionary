@@ -5,7 +5,6 @@ import { useToast } from '@hooks/useToast';
 import BookLayout from '@components/BookLayout';
 import AddEditEntryForm from '@components/AddEditEntryForm';
 import ToastContainer from '@components/ToastContainer';
-import ImportExport from '@components/ImportExport';
 
 /**
  * Root application component.
@@ -28,10 +27,7 @@ const App: React.FC = () => {
         const res = await dict.syncFromCloud();
         if (cancelled) return;
 
-        if (res.success) {
-          // Keep this quiet or show a toast; your choice.
-          // showToast('Synced from cloud');
-        } else {
+        if (!res.success) {
           showToast(res.error || 'Cloud sync failed');
         }
       } catch (err: any) {
@@ -43,7 +39,6 @@ const App: React.FC = () => {
     return () => {
       cancelled = true;
     };
-    // We want this to run once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -56,9 +51,6 @@ const App: React.FC = () => {
         onEdit={(entry) => setEditingEntry(entry)}
         onToast={showToast}
       />
-
-      {/* Local JSON import/export */}
-      <ImportExport dictionary={dict} onToast={showToast} />
 
       {/* Add / Edit form overlay */}
       {isAddOpen && (
@@ -84,13 +76,7 @@ const App: React.FC = () => {
           title="Modifiko Fjalë"
           initial={editingEntry}
           onSave={async (word, definition, illustration, recording) => {
-            const res = await dict.updateEntryAsync(
-              editingEntry.id,
-              word,
-              definition,
-              illustration,
-              recording
-            );
+            const res = await dict.updateEntryAsync(editingEntry.id, word, definition, illustration, recording);
             if (!res.success) {
               showToast(res.error || 'Gabim në ndryshim');
               return false;

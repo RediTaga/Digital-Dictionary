@@ -1,24 +1,27 @@
-export type CloudConfig = {
-  enabled: boolean;
+export interface CloudConfig {
+  /** Base URL of your API, e.g. https://your-project.vercel.app */
   apiBaseUrl: string;
-  passphrase?: string;
-};
+  /** Optional write passphrase, sent via X-Passphrase header */
+  passphrase: string;
+}
 
-// Always-on cloud sync (Option 1: no passphrase)
 const DEFAULT_API_BASE_URL = 'https://digital-dictionary.vercel.app';
 
-export function getCloudConfig(): CloudConfig {
+/**
+ * Always-on cloud config (Option 1).
+ * We intentionally do NOT use localStorage to avoid confusing UI/settings.
+ */
+export function loadCloudConfig(): CloudConfig | null {
   return {
-    enabled: true,
     apiBaseUrl: DEFAULT_API_BASE_URL,
-    passphrase: ''
+    passphrase: '',
   };
 }
 
-export function setCloudConfig(_cfg: CloudConfig): void {
-  // Intentionally ignore user changes to avoid confusing UI.
+export function saveCloudConfig(_cfg: CloudConfig): void {
+  // no-op (cloud settings are fixed in code)
 }
 
 export function clearCloudConfig(): void {
-  // No-op: cloud is always enabled.
+  // no-op (cloud settings are fixed in code)
 }
