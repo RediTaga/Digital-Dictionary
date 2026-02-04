@@ -83,15 +83,15 @@ const EntryDetails: React.FC<Props> = ({ dictionary, speech, onEdit, onToast }) 
     gap: '0.5rem',
     justifyContent: isMobile ? 'flex-start' : 'flex-end',
     flexWrap: 'wrap',
-    order: isMobile ? 0 : 1, // ✅ actions above title on mobile
+    order: isMobile ? 0 : 1, // actions above title on mobile
   };
 
   const titleStyle: React.CSSProperties = {
     margin: 0,
-    marginTop: isMobile ? '0.35rem' : 0, // ✅ small extra space under buttons on mobile
+    marginTop: isMobile ? '0.35rem' : '0.35rem', // small gap on both mobile + desktop
     fontSize: isMobile ? '2rem' : '2.25rem',
     lineHeight: 1.1,
-    order: isMobile ? 1 : 0,
+    order: isMobile ? 1 : 0, // title below actions on mobile
   };
 
   const sectionLabelStyle: React.CSSProperties = {
@@ -126,12 +126,7 @@ const EntryDetails: React.FC<Props> = ({ dictionary, speech, onEdit, onToast }) 
         <div style={sectionLabelStyle}>Ilustrim:</div>
         <div>{entry.illustration}</div>
 
-        {entry.recording ? (
-          <>
-            <div style={sectionLabelStyle}>Inçizim:</div>
-            <audio src={entry.recording} controls style={{ width: '100%', maxWidth: '420px' }} />
-          </>
-        ) : null}
+        {/* Recording section removed intentionally */}
       </div>
     </div>
   );
