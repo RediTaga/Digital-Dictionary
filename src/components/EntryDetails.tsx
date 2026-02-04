@@ -88,9 +88,10 @@ const EntryDetails: React.FC<Props> = ({ dictionary, speech, onEdit, onToast }) 
 
   const titleStyle: React.CSSProperties = {
     margin: 0,
+    marginTop: isMobile ? '0.35rem' : 0, // ✅ small extra space under buttons on mobile
     fontSize: isMobile ? '2rem' : '2.25rem',
     lineHeight: 1.1,
-    order: isMobile ? 1 : 0, // ✅ title below actions on mobile
+    order: isMobile ? 1 : 0,
   };
 
   const sectionLabelStyle: React.CSSProperties = {
