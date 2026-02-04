@@ -12,6 +12,41 @@ interface Props {
   onCancel: () => void;
 }
 
+function pickBestAudioMimeType(): string | undefined {
+  const MR: any = (window as any).MediaRecorder;
+  if (!MR || typeof MR.isTypeSupported !== 'function') return undefined;
+
+  // Order matters:
+  // - iOS Safari prefers MP4/AAC
+  // - Chrome/Edge/Android typically prefer WebM/Opus
+  const candidates = [
+    'audio/mp4',
+    'audio/mp4;codecs=mp4a.40.2',
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+    'audio/ogg',
+  ];
+
+  for (const t of candidates) {
+    try {
+      if (MR.isTypeSupported(t)) return t;
+    } catch {
+      // ignore
+    }
+  }
+  return undefined;
+}
+
+async function blobToDataURL(blob: Blob): Promise<string> {
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
 /**
  * Form for adding or editing a dictionary entry. Appears as a modal overlay.
  */
@@ -21,31 +56,46 @@ const AddEditEntryForm: React.FC<Props> = ({ title, initial, onSave, onCancel })
   const [illustration, setIllustration] = useState(initial?.illustration || '');
   const [recordingData, setRecordingData] = useState<string | null>(initial?.recording ?? null);
   const [isRecording, setIsRecording] = useState(false);
+
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
   const audioChunksRef = React.useRef<Blob[]>([]);
+
   const [errors, setErrors] = useState<{ word?: string; definition?: string; illustration?: string }>({});
   const [isSaving, setIsSaving] = useState(false);
 
   async function startRecording() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+
+      const mimeType = pickBestAudioMimeType();
+
+      // Create recorder with best supported type (if available)
+      const mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
+
       mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
+        if (event.data && event.data.size > 0) {
           audioChunksRef.current.push(event.data);
         }
       };
-      mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const base64 = reader.result as string;
-          setRecordingData(base64);
-        };
-        reader.readAsDataURL(audioBlob);
+
+      mediaRecorder.onstop = async () => {
+        try {
+          // IMPORTANT: Do NOT force audio/webm.
+          // Use the actual mimeType that the recorder produced.
+          const actualType = mediaRecorder.mimeType || mimeType || 'audio/webm';
+          const audioBlob = new Blob(audioChunksRef.current, { type: actualType });
+
+          const dataUrl = await blobToDataURL(audioBlob);
+          setRecordingData(dataUrl);
+        } catch (err) {
+          console.error('Failed to finalize recording', err);
+          setRecordingData(null);
+        }
       };
+
       mediaRecorder.start();
       setIsRecording(true);
     } catch (err) {
@@ -56,8 +106,16 @@ const AddEditEntryForm: React.FC<Props> = ({ title, initial, onSave, onCancel })
   function stopRecording() {
     const mediaRecorder = mediaRecorderRef.current;
     if (mediaRecorder && isRecording) {
-      mediaRecorder.stop();
-      mediaRecorder.stream.getTracks().forEach((track) => track.stop());
+      try {
+        mediaRecorder.stop();
+      } catch (err) {
+        console.error('Failed to stop recording', err);
+      }
+      try {
+        mediaRecorder.stream.getTracks().forEach((track) => track.stop());
+      } catch {
+        // ignore
+      }
       setIsRecording(false);
     }
   }
@@ -68,30 +126,32 @@ const AddEditEntryForm: React.FC<Props> = ({ title, initial, onSave, onCancel })
     const trimmedWord = word.trim();
     const trimmedDef = definition.trim();
     const trimmedIll = illustration.trim();
+
     if (!trimmedWord) {
       newErrors.word = 'Fjala është e detyrueshme.';
     } else if (trimmedWord.length > 60) {
       newErrors.word = 'Fjala duhet të ketë deri në 60 karaktere.';
     }
+
     if (!trimmedDef) {
       newErrors.definition = 'Përkufizimi është i detyrueshëm.';
     } else if (trimmedDef.length > 2000) {
       newErrors.definition = 'Përkufizimi duhet të ketë deri në 2000 karaktere.';
     }
+
     if (!trimmedIll) {
       newErrors.illustration = 'Ilustrimi është i detyrueshëm.';
     } else if (trimmedIll.length > 500) {
       newErrors.illustration = 'Ilustrimi duhet të ketë deri në 500 karaktere.';
     }
+
     setErrors(newErrors);
+
     if (Object.keys(newErrors).length === 0) {
       try {
         setIsSaving(true);
         const success = await onSave(trimmedWord, trimmedDef, trimmedIll, recordingData);
-        if (!success) {
-          // Error already handled via toast from parent
-          return;
-        }
+        if (!success) return;
       } finally {
         setIsSaving(false);
       }
@@ -125,17 +185,13 @@ const AddEditEntryForm: React.FC<Props> = ({ title, initial, onSave, onCancel })
         }}
       >
         <h2 style={{ marginTop: 0 }}>{title}</h2>
+
         <div className="form-group">
           <label htmlFor="word-input">Fjalë</label>
-          <input
-            id="word-input"
-            type="text"
-            value={word}
-            onChange={(e) => setWord(e.target.value)}
-            aria-required="true"
-          />
+          <input id="word-input" type="text" value={word} onChange={(e) => setWord(e.target.value)} aria-required="true" />
           {errors.word && <div style={{ color: 'red', fontSize: '0.875rem' }}>{errors.word}</div>}
         </div>
+
         <div className="form-group">
           <label htmlFor="definition-input">Përkufizim</label>
           <textarea
@@ -147,6 +203,7 @@ const AddEditEntryForm: React.FC<Props> = ({ title, initial, onSave, onCancel })
           />
           {errors.definition && <div style={{ color: 'red', fontSize: '0.875rem' }}>{errors.definition}</div>}
         </div>
+
         <div className="form-group">
           <label htmlFor="illustration-input">Ilustrim (fjalë në fjali)</label>
           <textarea
@@ -158,39 +215,29 @@ const AddEditEntryForm: React.FC<Props> = ({ title, initial, onSave, onCancel })
           />
           {errors.illustration && <div style={{ color: 'red', fontSize: '0.875rem' }}>{errors.illustration}</div>}
         </div>
+
         {/* Audio recording controls */}
         <div className="form-group">
           <label>Inçizim audio</label>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
             {!isRecording && (
-              <button
-                type="button"
-                className="btn secondary"
-                onClick={startRecording}
-                aria-label="Regjistro audio"
-              >
+              <button type="button" className="btn secondary" onClick={startRecording} aria-label="Regjistro audio">
                 Regjistro
               </button>
             )}
             {isRecording && (
-              <button
-                type="button"
-                className="btn danger"
-                onClick={stopRecording}
-                aria-label="Ndalo regjistrimin"
-              >
+              <button type="button" className="btn danger" onClick={stopRecording} aria-label="Ndalo regjistrimin">
                 Ndalo
               </button>
             )}
+
             {recordingData && !isRecording && (
               <>
                 <audio src={recordingData} controls style={{ maxWidth: '200px' }} />
                 <button
                   type="button"
                   className="btn secondary"
-                  onClick={() => {
-                    setRecordingData(null);
-                  }}
+                  onClick={() => setRecordingData(null)}
                   aria-label="Fshi inçizimin"
                 >
                   Fshi
@@ -199,6 +246,7 @@ const AddEditEntryForm: React.FC<Props> = ({ title, initial, onSave, onCancel })
             )}
           </div>
         </div>
+
         <div className="form-actions">
           <button type="button" className="btn secondary" onClick={onCancel} aria-label="Anulo" disabled={isSaving}>
             Anulo
