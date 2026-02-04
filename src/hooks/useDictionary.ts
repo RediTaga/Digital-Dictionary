@@ -20,8 +20,37 @@ export interface Entry {
 export type SortOrder = 'alphabetical' | 'newest';
 
 export interface ImportConflictResolution {
-  // When duplicate exists, choose how to handle: skip, overwrite existing, or keep both (with suffix on import)
   strategy: 'skip' | 'overwrite' | 'keepBoth';
+}
+
+/**
+ * Admin auth: store passphrase only in sessionStorage (not localStorage).
+ * This is not "high security" (admin could leak it), but the real protection is the server env var.
+ */
+const ADMIN_SESSION_KEY = 'dd_admin_passphrase';
+
+function getAdminPassphrase(): string {
+  try {
+    return sessionStorage.getItem(ADMIN_SESSION_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function setAdminPassphrase(passphrase: string) {
+  try {
+    sessionStorage.setItem(ADMIN_SESSION_KEY, passphrase);
+  } catch {
+    // ignore
+  }
+}
+
+function clearAdminPassphrase() {
+  try {
+    sessionStorage.removeItem(ADMIN_SESSION_KEY);
+  } catch {
+    // ignore
+  }
 }
 
 /**
@@ -35,10 +64,11 @@ export function useDictionary() {
   const [cloudStatus, setCloudStatus] = useState<'disabled' | 'syncing' | 'ready' | 'error'>('disabled');
   const [cloudError, setCloudError] = useState<string>('');
 
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+
   // Load entries from storage on first mount
   useEffect(() => {
     const data = loadData();
-    // Ensure missing fields have default values for backwards compatibility
     const normalizedEntries: Entry[] = data.entries.map((e) => ({
       id: e.id,
       word: e.word,
@@ -51,6 +81,11 @@ export function useDictionary() {
     setEntries(normalizedEntries);
   }, []);
 
+  // Initialize admin flag from session
+  useEffect(() => {
+    setIsAdmin(!!getAdminPassphrase());
+  }, []);
+
   // If cloud sync is configured, pull remote data once on startup.
   useEffect(() => {
     const cfg = loadCloudConfig();
@@ -58,7 +93,6 @@ export function useDictionary() {
       setCloudStatus('disabled');
       return;
     }
-    // Kick off a sync, but do not block rendering.
     (async () => {
       await syncFromCloud();
     })();
@@ -90,7 +124,6 @@ export function useDictionary() {
     if (sortOrder === 'alphabetical') {
       return [...filtered].sort((a, b) => a.word.localeCompare(b.word, undefined, { sensitivity: 'base' }));
     }
-    // Newest first by createdAt
     return [...filtered].sort((a, b) => b.createdAt - a.createdAt);
   }, [entries, searchQuery, sortOrder]);
 
@@ -99,19 +132,24 @@ export function useDictionary() {
     return entries.find((e) => e.id === selectedId) || null;
   }, [entries, selectedId]);
 
+  function requireAdmin(): { ok: true } | { ok: false; error: string } {
+    if (isAdmin) return { ok: true };
+    return { ok: false, error: 'Vetëm admin mund të shtojë/ndryshojë/fshijë fjalë.' };
+  }
+
   function addEntry(
     word: string,
     definition: string,
     illustration: string,
     recording: string | null,
   ): { success: boolean; error?: string } {
+    const admin = requireAdmin();
+    if (!admin.ok) return { success: false, error: admin.error };
+
     const normalized = word.trim().toLowerCase();
-    if (!normalized) {
-      return { success: false, error: 'Fjala nuk mund të jetë bosh.' };
-    }
-    if (normalizedMap.has(normalized)) {
-      return { success: false, error: 'Kjo fjalë ekziston.' };
-    }
+    if (!normalized) return { success: false, error: 'Fjala nuk mund të jetë bosh.' };
+    if (normalizedMap.has(normalized)) return { success: false, error: 'Kjo fjalë ekziston.' };
+
     const now = Date.now();
     const newEntry: Entry = {
       id: uuidv4(),
@@ -136,19 +174,24 @@ export function useDictionary() {
     illustration: string,
     recording: string | null,
   ): Promise<{ success: boolean; error?: string }> {
+    const admin = requireAdmin();
+    if (!admin.ok) return { success: false, error: admin.error };
+
     const cfg = loadCloudConfig();
     if (!cfg) {
       return addEntry(word, definition, illustration, recording);
     }
+
+    // Inject admin passphrase into cfg for write calls (dictionaryApi reads cfg.passphrase -> X-Passphrase)
+    const pass = getAdminPassphrase();
+    const cfgWithAdmin = { ...cfg, passphrase: pass };
+
     const normalized = word.trim().toLowerCase();
-    if (!normalized) {
-      return { success: false, error: 'Fjala nuk mund të jetë bosh.' };
-    }
-    if (normalizedMap.has(normalized)) {
-      return { success: false, error: 'Kjo fjalë ekziston.' };
-    }
+    if (!normalized) return { success: false, error: 'Fjala nuk mund të jetë bosh.' };
+    if (normalizedMap.has(normalized)) return { success: false, error: 'Kjo fjalë ekziston.' };
+
     try {
-      const created = await createEntry(cfg, {
+      const created = await createEntry(cfgWithAdmin as any, {
         word: word.trim(),
         definition: definition.trim(),
         illustration: illustration.trim(),
@@ -158,9 +201,8 @@ export function useDictionary() {
       setSelectedId(created.id);
       return { success: true };
     } catch (err: any) {
-      if (err?.status === 409) {
-        return { success: false, error: 'Kjo fjalë ekziston.' };
-      }
+      if (err?.status === 401) return { success: false, error: 'Admin key gabim ose mungon.' };
+      if (err?.status === 409) return { success: false, error: 'Kjo fjalë ekziston.' };
       return { success: false, error: err?.message || 'Gabim në shtim' };
     }
   }
@@ -172,6 +214,9 @@ export function useDictionary() {
     illustration: string,
     recording: string | null,
   ): { success: boolean; error?: string } {
+    const admin = requireAdmin();
+    if (!admin.ok) return { success: false, error: admin.error };
+
     const normalized = word.trim().toLowerCase();
     const existing = normalizedMap.get(normalized);
     if (existing && existing.id !== id) {
@@ -202,17 +247,25 @@ export function useDictionary() {
     illustration: string,
     recording: string | null,
   ): Promise<{ success: boolean; error?: string }> {
+    const admin = requireAdmin();
+    if (!admin.ok) return { success: false, error: admin.error };
+
     const cfg = loadCloudConfig();
     if (!cfg) {
       return updateEntry(id, word, definition, illustration, recording);
     }
+
+    const pass = getAdminPassphrase();
+    const cfgWithAdmin = { ...cfg, passphrase: pass };
+
     const normalized = word.trim().toLowerCase();
     const existing = normalizedMap.get(normalized);
     if (existing && existing.id !== id) {
       return { success: false, error: 'Ekziston një hyrje tjetër me këtë fjalë.' };
     }
+
     try {
-      const updated = await updateEntryRemote(cfg, id, {
+      const updated = await updateEntryRemote(cfgWithAdmin as any, id, {
         word: word.trim(),
         definition: definition.trim(),
         illustration: illustration.trim(),
@@ -221,41 +274,43 @@ export function useDictionary() {
       setEntries((prev) => prev.map((e) => (e.id === id ? updated : e)));
       return { success: true };
     } catch (err: any) {
-      if (err?.status === 409) {
-        return { success: false, error: 'Ekziston një hyrje tjetër me këtë fjalë.' };
-      }
+      if (err?.status === 401) return { success: false, error: 'Admin key gabim ose mungon.' };
+      if (err?.status === 409) return { success: false, error: 'Ekziston një hyrje tjetër me këtë fjalë.' };
       return { success: false, error: err?.message || 'Gabim në ndryshim' };
     }
   }
 
   function deleteEntry(id: string): void {
     setEntries((prev) => prev.filter((entry) => entry.id !== id));
-    if (selectedId === id) {
-      setSelectedId(null);
-    }
+    if (selectedId === id) setSelectedId(null);
   }
 
   /** Delete an entry, using the cloud API if configured. */
   async function deleteEntryAsync(id: string): Promise<{ success: boolean; error?: string }> {
+    const admin = requireAdmin();
+    if (!admin.ok) return { success: false, error: admin.error };
+
     const cfg = loadCloudConfig();
     if (!cfg) {
       deleteEntry(id);
       return { success: true };
     }
+
+    const pass = getAdminPassphrase();
+    const cfgWithAdmin = { ...cfg, passphrase: pass };
+
     try {
-      await deleteEntryRemote(cfg, id);
+      await deleteEntryRemote(cfgWithAdmin as any, id);
       deleteEntry(id);
       return { success: true };
     } catch (err: any) {
+      if (err?.status === 401) return { success: false, error: 'Admin key gabim ose mungon.' };
       return { success: false, error: err?.message || 'Gabim në fshirje' };
     }
   }
 
   /**
    * Pull all entries from the cloud API and replace local state.
-   *
-   * This is called once at startup if cloud settings exist, and can also be
-   * triggered manually.
    */
   async function syncFromCloud(): Promise<{ success: boolean; error?: string }> {
     const cfg = loadCloudConfig();
@@ -267,7 +322,8 @@ export function useDictionary() {
     setCloudStatus('syncing');
     setCloudError('');
     try {
-      const remote = await fetchEntries(cfg);
+      // Reads do not require admin passphrase
+      const remote = await fetchEntries(cfg as any);
       setEntries(remote);
       setCloudStatus('ready');
       return { success: true };
@@ -279,10 +335,28 @@ export function useDictionary() {
     }
   }
 
+  // Admin helpers exposed to UI
+  async function adminLogin(passphrase: string): Promise<{ success: boolean; error?: string }> {
+    const pass = (passphrase || '').trim();
+    if (!pass) return { success: false, error: 'Shkruaj admin key.' };
+
+    // We validate by doing a harmless write-protected call: try to create + immediately delete a temp entry is messy,
+    // so we instead just store and let the first write action prove it. Simple UX.
+    setAdminPassphrase(pass);
+    setIsAdmin(true);
+    return { success: true };
+  }
+
+  function adminLogout(): void {
+    clearAdminPassphrase();
+    setIsAdmin(false);
+  }
+
   function importEntries(
     imported: Entry[],
     resolution: ImportConflictResolution,
   ): { added: number; skipped: number; overwritten: number } {
+    // Keep import/export as a local admin-like tool; you can also admin-gate it if you want.
     let added = 0;
     let skipped = 0;
     let overwritten = 0;
@@ -297,7 +371,6 @@ export function useDictionary() {
             skipped++;
             continue;
           } else if (resolution.strategy === 'overwrite') {
-            // replace existing entry
             overwritten++;
             const idx = next.findIndex((e) => e.id === existing.id);
             next[idx] = {
@@ -309,7 +382,6 @@ export function useDictionary() {
               updatedAt: Date.now(),
             };
           } else if (resolution.strategy === 'keepBoth') {
-            // Create a unique word by appending a suffix
             let suffix = 1;
             let newWord = item.word;
             while (map.has(newWord.toLowerCase())) {
@@ -330,7 +402,6 @@ export function useDictionary() {
             added++;
           }
         } else {
-          // Add new entry
           const now = Date.now();
           const newEntry: Entry = {
             id: uuidv4(),
@@ -365,14 +436,22 @@ export function useDictionary() {
     selectedId,
     setSelectedId,
     selectedEntry,
+
+    // Admin
+    isAdmin,
+    adminLogin,
+    adminLogout,
+
     addEntry,
     addEntryAsync,
     updateEntry,
     updateEntryAsync,
     deleteEntry,
     deleteEntryAsync,
+
     importEntries,
     exportEntries,
+
     syncFromCloud,
     cloudStatus,
     cloudError,
