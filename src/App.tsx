@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useDictionary, Entry } from '@hooks/useDictionary';
 import { useSpeech } from '@hooks/useSpeech';
 import { useToast } from '@hooks/useToast';
@@ -6,7 +6,6 @@ import BookLayout from '@components/BookLayout';
 import AddEditEntryForm from '@components/AddEditEntryForm';
 import ToastContainer from '@components/ToastContainer';
 import ImportExport from '@components/ImportExport';
-import CloudApiSettings from '@components/CloudApiSettings';
 
 /**
  * Root application component.
@@ -19,6 +18,34 @@ const App: React.FC = () => {
   // Form state for adding/editing entries
   const [isAddOpen, setAddOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<Entry | null>(null);
+
+  // Auto-sync once on load (no UI buttons)
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await dict.syncFromCloud();
+        if (cancelled) return;
+
+        if (res.success) {
+          // Keep this quiet or show a toast; your choice.
+          // showToast('Synced from cloud');
+        } else {
+          showToast(res.error || 'Cloud sync failed');
+        }
+      } catch (err: any) {
+        if (cancelled) return;
+        showToast(err?.message || 'Cloud sync failed');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // We want this to run once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <>
@@ -33,15 +60,6 @@ const App: React.FC = () => {
       {/* Local JSON import/export */}
       <ImportExport dictionary={dict} onToast={showToast} />
 
-      {/* Cloud DB/API configuration */}
-      <CloudApiSettings
-        onToast={showToast}
-        onChange={async () => {
-          const res = await dict.syncFromCloud();
-          if (res.success) showToast('Synced from cloud');
-          else showToast(res.error || 'Cloud sync failed');
-        }}
-      />
       {/* Add / Edit form overlay */}
       {isAddOpen && (
         <AddEditEntryForm
@@ -60,12 +78,19 @@ const App: React.FC = () => {
           onCancel={() => setAddOpen(false)}
         />
       )}
+
       {editingEntry && (
         <AddEditEntryForm
           title="Modifiko Fjalë"
           initial={editingEntry}
           onSave={async (word, definition, illustration, recording) => {
-            const res = await dict.updateEntryAsync(editingEntry.id, word, definition, illustration, recording);
+            const res = await dict.updateEntryAsync(
+              editingEntry.id,
+              word,
+              definition,
+              illustration,
+              recording
+            );
             if (!res.success) {
               showToast(res.error || 'Gabim në ndryshim');
               return false;
@@ -77,6 +102,7 @@ const App: React.FC = () => {
           onCancel={() => setEditingEntry(null)}
         />
       )}
+
       <ToastContainer toasts={toasts} />
     </>
   );
