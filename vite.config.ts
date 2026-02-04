@@ -5,6 +5,10 @@ import { fileURLToPath, URL } from 'url';
 // Vite configuration for the Digital Dictionary app.
 export default defineConfig({
   plugins: [react()],
+
+  // IMPORTANT for GitHub Pages (repo name = Digital-Dictionary)
+  base: '/Digital-Dictionary/',
+
   build: {
     outDir: 'dist',
     emptyOutDir: true,
