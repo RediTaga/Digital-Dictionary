@@ -1,6 +1,8 @@
 import { useEffect, useState, useMemo } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { loadData, saveData, DataSchema, EntryRecord } from '@utils/storage';
+import { loadCloudConfig } from '@utils/cloudConfig';
+import { createEntry, deleteEntryRemote, fetchEntries, updateEntryRemote } from '@utils/dictionaryApi';
 
 export interface Entry {
   id: string;
@@ -30,6 +32,8 @@ export function useDictionary() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sortOrder, setSortOrder] = useState<SortOrder>('alphabetical');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [cloudStatus, setCloudStatus] = useState<'disabled' | 'syncing' | 'ready' | 'error'>('disabled');
+  const [cloudError, setCloudError] = useState<string>('');
 
   // Load entries from storage on first mount
   useEffect(() => {
@@ -45,6 +49,20 @@ export function useDictionary() {
       recording: (e as any).recording ?? null,
     }));
     setEntries(normalizedEntries);
+  }, []);
+
+  // If cloud sync is configured, pull remote data once on startup.
+  useEffect(() => {
+    const cfg = loadCloudConfig();
+    if (!cfg) {
+      setCloudStatus('disabled');
+      return;
+    }
+    // Kick off a sync, but do not block rendering.
+    (async () => {
+      await syncFromCloud();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Persist entries whenever they change
@@ -109,6 +127,44 @@ export function useDictionary() {
     return { success: true };
   }
 
+  /**
+   * Add an entry, using the cloud API if configured.
+   */
+  async function addEntryAsync(
+    word: string,
+    definition: string,
+    illustration: string,
+    recording: string | null,
+  ): Promise<{ success: boolean; error?: string }> {
+    const cfg = loadCloudConfig();
+    if (!cfg) {
+      return addEntry(word, definition, illustration, recording);
+    }
+    const normalized = word.trim().toLowerCase();
+    if (!normalized) {
+      return { success: false, error: 'Fjala nuk mund të jetë bosh.' };
+    }
+    if (normalizedMap.has(normalized)) {
+      return { success: false, error: 'Kjo fjalë ekziston.' };
+    }
+    try {
+      const created = await createEntry(cfg, {
+        word: word.trim(),
+        definition: definition.trim(),
+        illustration: illustration.trim(),
+        recording: recording || null,
+      });
+      setEntries((prev) => [...prev, created]);
+      setSelectedId(created.id);
+      return { success: true };
+    } catch (err: any) {
+      if (err?.status === 409) {
+        return { success: false, error: 'Kjo fjalë ekziston.' };
+      }
+      return { success: false, error: err?.message || 'Gabim në shtim' };
+    }
+  }
+
   function updateEntry(
     id: string,
     word: string,
@@ -138,10 +194,88 @@ export function useDictionary() {
     return { success: true };
   }
 
+  /** Update an entry, using the cloud API if configured. */
+  async function updateEntryAsync(
+    id: string,
+    word: string,
+    definition: string,
+    illustration: string,
+    recording: string | null,
+  ): Promise<{ success: boolean; error?: string }> {
+    const cfg = loadCloudConfig();
+    if (!cfg) {
+      return updateEntry(id, word, definition, illustration, recording);
+    }
+    const normalized = word.trim().toLowerCase();
+    const existing = normalizedMap.get(normalized);
+    if (existing && existing.id !== id) {
+      return { success: false, error: 'Ekziston një hyrje tjetër me këtë fjalë.' };
+    }
+    try {
+      const updated = await updateEntryRemote(cfg, id, {
+        word: word.trim(),
+        definition: definition.trim(),
+        illustration: illustration.trim(),
+        recording: recording || null,
+      });
+      setEntries((prev) => prev.map((e) => (e.id === id ? updated : e)));
+      return { success: true };
+    } catch (err: any) {
+      if (err?.status === 409) {
+        return { success: false, error: 'Ekziston një hyrje tjetër me këtë fjalë.' };
+      }
+      return { success: false, error: err?.message || 'Gabim në ndryshim' };
+    }
+  }
+
   function deleteEntry(id: string): void {
     setEntries((prev) => prev.filter((entry) => entry.id !== id));
     if (selectedId === id) {
       setSelectedId(null);
+    }
+  }
+
+  /** Delete an entry, using the cloud API if configured. */
+  async function deleteEntryAsync(id: string): Promise<{ success: boolean; error?: string }> {
+    const cfg = loadCloudConfig();
+    if (!cfg) {
+      deleteEntry(id);
+      return { success: true };
+    }
+    try {
+      await deleteEntryRemote(cfg, id);
+      deleteEntry(id);
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Gabim në fshirje' };
+    }
+  }
+
+  /**
+   * Pull all entries from the cloud API and replace local state.
+   *
+   * This is called once at startup if cloud settings exist, and can also be
+   * triggered manually.
+   */
+  async function syncFromCloud(): Promise<{ success: boolean; error?: string }> {
+    const cfg = loadCloudConfig();
+    if (!cfg) {
+      setCloudStatus('disabled');
+      setCloudError('');
+      return { success: false, error: 'Cloud sync is not configured' };
+    }
+    setCloudStatus('syncing');
+    setCloudError('');
+    try {
+      const remote = await fetchEntries(cfg);
+      setEntries(remote);
+      setCloudStatus('ready');
+      return { success: true };
+    } catch (err: any) {
+      const msg = err?.message || 'Failed to sync from cloud';
+      setCloudStatus('error');
+      setCloudError(msg);
+      return { success: false, error: msg };
     }
   }
 
@@ -232,9 +366,15 @@ export function useDictionary() {
     setSelectedId,
     selectedEntry,
     addEntry,
+    addEntryAsync,
     updateEntry,
+    updateEntryAsync,
     deleteEntry,
+    deleteEntryAsync,
     importEntries,
     exportEntries,
+    syncFromCloud,
+    cloudStatus,
+    cloudError,
   };
 }

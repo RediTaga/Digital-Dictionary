@@ -8,7 +8,7 @@ interface Props {
    * Called when the user saves the entry. Receives word, definition, illustration, and recording.
    * Should return true if successful, false otherwise.
    */
-  onSave: (word: string, definition: string, illustration: string, recording: string | null) => boolean;
+  onSave: (word: string, definition: string, illustration: string, recording: string | null) => boolean | Promise<boolean>;
   onCancel: () => void;
 }
 
@@ -24,6 +24,7 @@ const AddEditEntryForm: React.FC<Props> = ({ title, initial, onSave, onCancel })
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
   const audioChunksRef = React.useRef<Blob[]>([]);
   const [errors, setErrors] = useState<{ word?: string; definition?: string; illustration?: string }>({});
+  const [isSaving, setIsSaving] = useState(false);
 
   async function startRecording() {
     try {
@@ -61,7 +62,7 @@ const AddEditEntryForm: React.FC<Props> = ({ title, initial, onSave, onCancel })
     }
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const newErrors: { word?: string; definition?: string; illustration?: string } = {};
     const trimmedWord = word.trim();
@@ -84,10 +85,15 @@ const AddEditEntryForm: React.FC<Props> = ({ title, initial, onSave, onCancel })
     }
     setErrors(newErrors);
     if (Object.keys(newErrors).length === 0) {
-      const success = onSave(trimmedWord, trimmedDef, trimmedIll, recordingData);
-      if (!success) {
-        // Error already handled via toast from parent
-        return;
+      try {
+        setIsSaving(true);
+        const success = await onSave(trimmedWord, trimmedDef, trimmedIll, recordingData);
+        if (!success) {
+          // Error already handled via toast from parent
+          return;
+        }
+      } finally {
+        setIsSaving(false);
       }
     }
   }
@@ -194,11 +200,11 @@ const AddEditEntryForm: React.FC<Props> = ({ title, initial, onSave, onCancel })
           </div>
         </div>
         <div className="form-actions">
-          <button type="button" className="btn secondary" onClick={onCancel} aria-label="Anulo">
+          <button type="button" className="btn secondary" onClick={onCancel} aria-label="Anulo" disabled={isSaving}>
             Anulo
           </button>
-          <button type="submit" className="btn primary" aria-label="Ruaj">
-            Ruaj
+          <button type="submit" className="btn primary" aria-label="Ruaj" disabled={isSaving}>
+            {isSaving ? 'Duke ruajtur...' : 'Ruaj'}
           </button>
         </div>
       </form>

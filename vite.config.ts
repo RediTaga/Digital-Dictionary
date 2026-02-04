@@ -4,10 +4,6 @@ import { fileURLToPath, URL } from 'url';
 
 // Vite configuration for the Digital Dictionary app.
 export default defineConfig({
-  // IMPORTANT for GitHub Pages project sites:
-  // https://reditaga.github.io/Digital-Dictionary/  -> base must be "/Digital-Dictionary/"
-  base: '/Digital-Dictionary/',
-
   plugins: [react()],
   build: {
     outDir: 'dist',

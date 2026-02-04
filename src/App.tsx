@@ -5,6 +5,8 @@ import { useToast } from '@hooks/useToast';
 import BookLayout from '@components/BookLayout';
 import AddEditEntryForm from '@components/AddEditEntryForm';
 import ToastContainer from '@components/ToastContainer';
+import ImportExport from '@components/ImportExport';
+import CloudApiSettings from '@components/CloudApiSettings';
 
 /**
  * Root application component.
@@ -27,13 +29,26 @@ const App: React.FC = () => {
         onEdit={(entry) => setEditingEntry(entry)}
         onToast={showToast}
       />
+
+      {/* Local JSON import/export */}
+      <ImportExport dictionary={dict} onToast={showToast} />
+
+      {/* Cloud DB/API configuration */}
+      <CloudApiSettings
+        onToast={showToast}
+        onChange={async () => {
+          const res = await dict.syncFromCloud();
+          if (res.success) showToast('Synced from cloud');
+          else showToast(res.error || 'Cloud sync failed');
+        }}
+      />
       {/* Add / Edit form overlay */}
       {isAddOpen && (
         <AddEditEntryForm
           title="Shto Fjalë"
           initial={null}
-          onSave={(word, definition, illustration, recording) => {
-            const result = dict.addEntry(word, definition, illustration, recording);
+          onSave={async (word, definition, illustration, recording) => {
+            const result = await dict.addEntryAsync(word, definition, illustration, recording);
             if (!result.success) {
               showToast(result.error || 'Gabim në shtim');
               return false;
@@ -49,8 +64,8 @@ const App: React.FC = () => {
         <AddEditEntryForm
           title="Modifiko Fjalë"
           initial={editingEntry}
-          onSave={(word, definition, illustration, recording) => {
-            const res = dict.updateEntry(editingEntry.id, word, definition, illustration, recording);
+          onSave={async (word, definition, illustration, recording) => {
+            const res = await dict.updateEntryAsync(editingEntry.id, word, definition, illustration, recording);
             if (!res.success) {
               showToast(res.error || 'Gabim në ndryshim');
               return false;

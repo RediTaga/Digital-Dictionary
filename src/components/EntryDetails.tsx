@@ -13,7 +13,7 @@ interface Props {
  * Shows details of the selected entry, along with controls to edit, delete, and speak.
  */
 const EntryDetails: React.FC<Props> = ({ dictionary, speech, onEdit, onToast }) => {
-  const { selectedEntry, deleteEntry } = dictionary;
+  const { selectedEntry, deleteEntryAsync } = dictionary;
   const { supported, speak, stop } = speech;
   if (!selectedEntry) {
     // Show an Albanian prompt when no entry is selected
@@ -52,10 +52,14 @@ const EntryDetails: React.FC<Props> = ({ dictionary, speech, onEdit, onToast }) 
           </button>
           <button
             className="btn danger"
-            onClick={() => {
+            onClick={async () => {
               if (confirm('Të fshihet kjo fjalë?')) {
-                deleteEntry(id);
-                onToast('Fjala u fshi');
+                const res = await deleteEntryAsync(id);
+                if (res.success) {
+                  onToast('Fjala u fshi');
+                } else {
+                  onToast(res.error || 'Gabim në fshirje');
+                }
               }
             }}
             aria-label="Fshij fjalën"
