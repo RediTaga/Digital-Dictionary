@@ -1,6 +1,6 @@
-import { applyCors } from './_cors';
-import { requirePassphrase } from './_auth';
-import { sql } from './_db';
+import { applyCors } from './_cors.js';
+import { requirePassphrase } from './_auth.js';
+import { sql } from './_db.js';
 
 function json(res: any, status: number, payload: any) {
   res.statusCode = status;
