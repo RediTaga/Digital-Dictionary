@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Entry, useDictionary } from '@hooks/useDictionary';
 import { useSpeech } from '@hooks/useSpeech';
 
@@ -19,6 +19,10 @@ const EntryDetails: React.FC<Props> = ({ dictionary, speech, onEdit, onToast }) 
 
   const [isMobile, setIsMobile] = useState<boolean>(isMobileNow());
 
+  // Keep one audio instance so we can stop previous playback
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const lastRecordingRef = useRef<string | null>(null);
+
   useEffect(() => {
     function handleResize() {
       setIsMobile(isMobileNow());
@@ -26,6 +30,19 @@ const EntryDetails: React.FC<Props> = ({ dictionary, speech, onEdit, onToast }) 
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  // Stop any playing audio when switching entries
+  useEffect(() => {
+    if (audioRef.current) {
+      try {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      } catch {
+        // ignore
+      }
+    }
+    lastRecordingRef.current = null;
+  }, [entry?.id]);
 
   const canEdit = useMemo(() => {
     return !!dictionary.isAdmin;
@@ -40,10 +57,38 @@ const EntryDetails: React.FC<Props> = ({ dictionary, speech, onEdit, onToast }) 
     );
   }
 
-  const handleSpeak = () => {
+  async function playCustomRecording(recording: string) {
+    try {
+      // If we already have an audio instance but the src changed, replace it
+      if (!audioRef.current || lastRecordingRef.current !== recording) {
+        audioRef.current = new Audio(recording);
+        lastRecordingRef.current = recording;
+      }
+
+      // Restart from beginning each click
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+
+      // Play (click is a user gesture, so this should work on iOS too)
+      await audioRef.current.play();
+    } catch (err) {
+      console.error('Failed to play recording', err);
+      onToast('Nuk mund të luaj inçizimin.');
+    }
+  }
+
+  const handleSpeak = async () => {
+    // If entry has recording, play it; otherwise use TTS
+    const rec = entry.recording ?? null;
+    if (rec && typeof rec === 'string' && rec.trim().length > 0) {
+      await playCustomRecording(rec);
+      return;
+    }
+
     try {
       speech.speak(entry.word);
-    } catch {
+    } catch (err) {
+      console.error('TTS failed', err);
       onToast('Nuk mund të luaj tingullin.');
     }
   };
@@ -83,15 +128,15 @@ const EntryDetails: React.FC<Props> = ({ dictionary, speech, onEdit, onToast }) 
     gap: '0.5rem',
     justifyContent: isMobile ? 'flex-start' : 'flex-end',
     flexWrap: 'wrap',
-    order: isMobile ? 0 : 1, // actions above title on mobile
+    order: isMobile ? 0 : 1,
   };
 
   const titleStyle: React.CSSProperties = {
     margin: 0,
-    marginTop: isMobile ? '0.35rem' : '0.35rem', // small gap on both mobile + desktop
+    marginTop: '0.35rem',
     fontSize: isMobile ? '2rem' : '2.25rem',
     lineHeight: 1.1,
-    order: isMobile ? 1 : 0, // title below actions on mobile
+    order: isMobile ? 1 : 0,
   };
 
   const sectionLabelStyle: React.CSSProperties = {
@@ -126,7 +171,7 @@ const EntryDetails: React.FC<Props> = ({ dictionary, speech, onEdit, onToast }) 
         <div style={sectionLabelStyle}>Ilustrim:</div>
         <div>{entry.illustration}</div>
 
-        {/* Recording section removed intentionally */}
+        {/* Recording section intentionally hidden; speaker button handles it */}
       </div>
     </div>
   );
