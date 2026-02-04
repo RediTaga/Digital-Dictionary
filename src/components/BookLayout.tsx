@@ -68,32 +68,23 @@ const BookLayout: React.FC<Props> = ({ dictionary, speech, onAdd, onEdit, onToas
   };
 
   return (
-    <div className="book" role="region" aria-label="Digital dictionary book">
-      {/* Top bar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem' }}>
-        {isMobile ? (
-          <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem' }}>
-            <button
-              className={`btn ${activeTab === 'index' ? 'primary' : 'secondary'}`}
-              onClick={() => setActiveTab('index')}
-            >
-              Indeks
-            </button>
-            <button
-              className={`btn ${activeTab === 'details' ? 'primary' : 'secondary'}`}
-              onClick={() => setActiveTab('details')}
-            >
-              Faqe
-            </button>
-          </div>
-        ) : (
-          <div />
-        )}
-
-        <button className={`btn ${dictionary.isAdmin ? 'danger' : 'secondary'}`} onClick={handleAdminToggle}>
-          {dictionary.isAdmin ? '🔓 Admin' : '🔒 Admin'}
-        </button>
-      </div>
+    <div className="book" role="region" aria-label="Digital dictionary book" style={{ position: 'relative' }}>
+      {isMobile && (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '0.5rem', gap: '0.5rem' }}>
+          <button
+            className={`btn ${activeTab === 'index' ? 'primary' : 'secondary'}`}
+            onClick={() => setActiveTab('index')}
+          >
+            Indeks
+          </button>
+          <button
+            className={`btn ${activeTab === 'details' ? 'primary' : 'secondary'}`}
+            onClick={() => setActiveTab('details')}
+          >
+            Faqe
+          </button>
+        </div>
+      )}
 
       <div className="page" style={{ display: isMobile ? (activeTab === 'index' ? 'block' : 'none') : 'block' }}>
         <DictionaryIndex dictionary={dictionary} onAdd={guardedAdd} onEdit={guardedEdit} />
@@ -104,6 +95,29 @@ const BookLayout: React.FC<Props> = ({ dictionary, speech, onAdd, onEdit, onToas
       <div className="page" style={{ display: isMobile ? (activeTab === 'details' ? 'block' : 'none') : 'block' }}>
         <EntryDetails dictionary={dictionary} speech={speech} onEdit={guardedEdit} onToast={onToast} />
       </div>
+
+      {/* Floating Admin button (does not affect layout) */}
+      <button
+        type="button"
+        onClick={handleAdminToggle}
+        title={dictionary.isAdmin ? 'Disable admin' : 'Enable admin'}
+        style={{
+          position: 'fixed',
+          left: '14px',
+          bottom: '14px',
+          zIndex: 9999,
+          padding: '8px 10px',
+          borderRadius: '10px',
+          border: '1px solid rgba(0,0,0,0.15)',
+          background: dictionary.isAdmin ? '#ffd6d6' : '#eee',
+          cursor: 'pointer',
+          fontSize: '14px',
+          boxShadow: '0 6px 18px rgba(0,0,0,0.12)',
+        }}
+        aria-label={dictionary.isAdmin ? 'Admin enabled (click to disable)' : 'Admin disabled (click to enable)'}
+      >
+        {dictionary.isAdmin ? '🔓 Admin' : '🔒 Admin'}
+      </button>
     </div>
   );
 };
