@@ -1,5 +1,5 @@
-import React from 'react';
-import { useDictionary, Entry } from '@hooks/useDictionary';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Entry, useDictionary } from '@hooks/useDictionary';
 import { useSpeech } from '@hooks/useSpeech';
 
 interface Props {
@@ -9,70 +9,128 @@ interface Props {
   onToast: (message: string) => void;
 }
 
-/**
- * Shows details of the selected entry, along with controls to edit, delete, and speak.
- */
+function isMobileNow(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.innerWidth <= 768;
+}
+
 const EntryDetails: React.FC<Props> = ({ dictionary, speech, onEdit, onToast }) => {
-  const { selectedEntry, deleteEntryAsync } = dictionary;
-  const { supported, speak, stop } = speech;
-  if (!selectedEntry) {
-    // Show an Albanian prompt when no entry is selected
-    return <p>Zgjidhni një fjalë nga indeksi për të parë përkufizimin.</p>;
+  const entry = dictionary.selectedEntry;
+
+  const [isMobile, setIsMobile] = useState<boolean>(isMobileNow());
+
+  useEffect(() => {
+    function handleResize() {
+      setIsMobile(isMobileNow());
+    }
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const canEdit = useMemo(() => {
+    return !!dictionary.isAdmin;
+  }, [dictionary.isAdmin]);
+
+  if (!entry) {
+    return (
+      <div style={{ padding: '1rem' }}>
+        <h2 style={{ marginTop: 0 }}>Zgjidh një fjalë</h2>
+        <p>Zgjidh një hyrje nga indeksi për të parë detajet.</p>
+      </div>
+    );
   }
-  const { id, word, definition, illustration, recording } = selectedEntry;
+
+  const handleSpeak = () => {
+    try {
+      speech.speak(entry.word);
+    } catch {
+      onToast('Nuk mund të luaj tingullin.');
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!canEdit) {
+      onToast('Vetëm admin mund të fshijë.');
+      return;
+    }
+    const ok = window.confirm('A je i sigurt që do ta fshish këtë fjalë?');
+    if (!ok) return;
+
+    const res = await dictionary.deleteEntryAsync(entry.id);
+    if (!res.success) onToast(res.error || 'Gabim në fshirje');
+    else onToast('U fshi');
+  };
+
+  const handleEdit = () => {
+    if (!canEdit) {
+      onToast('Vetëm admin mund të modifikojë.');
+      return;
+    }
+    onEdit(entry);
+  };
+
+  // --- Layout styles ---
+  const headerWrapStyle: React.CSSProperties = {
+    display: 'flex',
+    flexDirection: isMobile ? 'column' : 'row',
+    alignItems: isMobile ? 'stretch' : 'flex-start',
+    justifyContent: 'space-between',
+    gap: isMobile ? '0.5rem' : '1rem',
+  };
+
+  const actionsStyle: React.CSSProperties = {
+    display: 'flex',
+    gap: '0.5rem',
+    justifyContent: isMobile ? 'flex-start' : 'flex-end',
+    flexWrap: 'wrap',
+    order: isMobile ? 0 : 1, // ✅ actions above title on mobile
+  };
+
+  const titleStyle: React.CSSProperties = {
+    margin: 0,
+    fontSize: isMobile ? '2rem' : '2.25rem',
+    lineHeight: 1.1,
+    order: isMobile ? 1 : 0, // ✅ title below actions on mobile
+  };
+
+  const sectionLabelStyle: React.CSSProperties = {
+    fontWeight: 700,
+    marginTop: '1rem',
+    marginBottom: '0.25rem',
+  };
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-        <h2 style={{ margin: 0 }}>{word}</h2>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          {supported ? (
-            <button
-              className="btn secondary"
-              onClick={() => {
-                // If already speaking, stop and restart
-                if (recording) {
-                  // play recorded audio
-                  const audio = new Audio(recording);
-                  audio.play();
-                } else {
-                  speech.stop();
-                  speak(`${word}. ${definition}`);
-                }
-              }}
-              aria-label={`Dëgjo ${word}`}
-            >
-              🔊
-            </button>
-          ) : (
-            <span title="Speech synthesis not supported">🔇</span>
-          )}
-          <button className="btn secondary" onClick={() => onEdit(selectedEntry)} aria-label="Modifiko fjalën">
+    <div style={{ padding: '1rem' }}>
+      <div style={headerWrapStyle}>
+        <div style={actionsStyle}>
+          <button className="btn secondary" onClick={handleSpeak} aria-label="Dëgjo fjalën">
+            🔊
+          </button>
+
+          <button className="btn secondary" onClick={handleEdit} aria-label="Modifiko" disabled={!canEdit}>
             Modifiko
           </button>
-          <button
-            className="btn danger"
-            onClick={async () => {
-              if (confirm('Të fshihet kjo fjalë?')) {
-                const res = await deleteEntryAsync(id);
-                if (res.success) {
-                  onToast('Fjala u fshi');
-                } else {
-                  onToast(res.error || 'Gabim në fshirje');
-                }
-              }
-            }}
-            aria-label="Fshij fjalën"
-          >
-            Fshij
+
+          <button className="btn danger" onClick={handleDelete} aria-label="Fshi" disabled={!canEdit}>
+            Fshi
           </button>
         </div>
+
+        <h2 style={titleStyle}>{entry.word}</h2>
       </div>
-      <p style={{ whiteSpace: 'pre-wrap' }}>{definition}</p>
-      <div style={{ marginTop: '1rem' }}>
-        <strong>Ilustrim:</strong>
-        <p style={{ whiteSpace: 'pre-wrap', marginTop: '0.25rem' }}>{illustration}</p>
-        {/* Audio playback is hidden in dictionary view; the user can hear it via the speaker button */}
+
+      <div style={{ marginTop: '0.75rem' }}>
+        <p style={{ marginTop: 0 }}>{entry.definition}</p>
+
+        <div style={sectionLabelStyle}>Ilustrim:</div>
+        <div>{entry.illustration}</div>
+
+        {entry.recording ? (
+          <>
+            <div style={sectionLabelStyle}>Inçizim:</div>
+            <audio src={entry.recording} controls style={{ width: '100%', maxWidth: '420px' }} />
+          </>
+        ) : null}
       </div>
     </div>
   );
